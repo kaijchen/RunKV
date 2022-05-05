@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use futures_util::StreamExt;
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use runkv_common::channel_pool::ChannelPool;
@@ -14,10 +15,11 @@ use runkv_common::context::Context;
 use runkv_common::notify_pool::NotifyPool;
 use runkv_proto::common::Endpoint;
 use runkv_proto::kv::kv_service_server::KvService;
+use runkv_proto::kv::stream_kv_service_server::StreamKvService;
 use runkv_proto::kv::{
     kv_op_request, kv_op_response, DeleteRequest, DeleteResponse, GetRequest, GetResponse,
-    KvOpRequest, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse, TxnRequest,
-    TxnResponse,
+    KvOpRequest, PutRequest, PutResponse, SnapshotRequest, SnapshotResponse, StreamTxnRequest,
+    StreamTxnResponse, TxnRequest, TxnResponse,
 };
 use runkv_proto::wheel::raft_service_server::RaftService;
 use runkv_proto::wheel::wheel_service_server::WheelService;
@@ -26,7 +28,7 @@ use runkv_proto::wheel::{
     RaftRequest, RaftResponse,
 };
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{trace_span, Instrument};
+use tracing::{trace, trace_span, Instrument};
 
 use crate::components::command::Command;
 use crate::components::raft_manager::RaftManager;
@@ -325,6 +327,35 @@ impl Wheel {
         // TODO: Find the potential leader.
         Ok(raft_nodes)
     }
+
+    async fn stream_txn_raft_nodes<'a>(&self, request: &'a StreamTxnRequest) -> Result<Vec<u64>> {
+        assert!(!request.ops.is_empty());
+
+        let key = |req: &'a kv_op_request::Request| -> &'a [u8] {
+            match req {
+                kv_op_request::Request::Get(GetRequest { key, .. }) => key,
+                kv_op_request::Request::Put(PutRequest { key, .. }) => key,
+                kv_op_request::Request::Delete(DeleteRequest { key }) => key,
+                kv_op_request::Request::Snapshot(SnapshotRequest { key }) => key,
+            }
+        };
+
+        let keys = request
+            .ops
+            .iter()
+            .map(|op| key(op.request.as_ref().unwrap()))
+            .collect_vec();
+
+        let (_range, _group, raft_nodes) = self
+            .inner
+            .meta_store
+            .all_in_range(&keys)
+            .await?
+            .ok_or_else(|| KvError::InvalidShard(format!("request {:?}", request)))?;
+
+        // TODO: Find the potential leader.
+        Ok(raft_nodes)
+    }
 }
 
 #[async_trait]
@@ -489,5 +520,35 @@ impl KvService for Wheel {
             .kv_service_txn_latency_histogram_vec
             .observe(elapsed.as_secs_f64());
         Ok(Response::new(rsp))
+    }
+}
+
+#[async_trait]
+impl StreamKvService for Wheel {
+    type StreamTxnStream = Pin<
+        Box<dyn Stream<Item = core::result::Result<StreamTxnResponse, Status>> + Send + 'static>,
+    >;
+
+    async fn stream_txn(
+        &self,
+        request: Request<Streaming<StreamTxnRequest>>,
+    ) -> core::result::Result<Response<Self::StreamTxnStream>, Status> {
+        let mut input = request.into_inner();
+
+        // let wheel = self.clone();
+
+        let output = async_stream::try_stream! {
+            while let Some(request) = input.next().await {
+                let req = request?;
+                let client_id = req.client_id;
+                trace!("req: {:?}, client id: {}",req,client_id);
+                // let raft_nodes = wheel.stream_txn_raft_nodes(&req).await.map_err(internal)?;
+                // let raft_node = raft_nodes[0];
+                let rsp = StreamTxnResponse::default();
+                yield rsp;
+            }
+        };
+
+        Ok(Response::new(Box::pin(output) as Self::StreamTxnStream))
     }
 }

@@ -2174,9 +2174,16 @@ dependencies = [
 name = "runkv-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "bincode",
  "runkv-common",
  "runkv-proto",
+ "thiserror",
+ "tokio",
  "tonic",
+ "tracing",
 ]
 
 [[package]]
@@ -2360,6 +2367,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-stream",
  "async-trait",
  "bincode",
  "bytes",

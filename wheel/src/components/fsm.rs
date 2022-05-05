@@ -18,7 +18,7 @@ use super::raft_log_store::RaftGroupLogStore;
 use crate::error::{Error, Result};
 
 #[async_trait]
-pub trait Fsm: Send + Sync + Clone + 'static {
+pub trait Fsm: Send + Sync + 'static {
     async fn apply(
         &self,
         group: u64,
@@ -72,7 +72,6 @@ pub struct ObjectLsmTreeFsmOptions {
     pub txn_notify_pool: NotifyPool<u64, Result<TxnResponse>>,
 }
 
-#[derive(Clone)]
 pub struct ObjectLsmTreeFsm {
     node: u64,
     group: u64,

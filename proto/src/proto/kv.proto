@@ -2,6 +2,12 @@ syntax = "proto3";
 
 package kv;
 
+enum Status {
+  OK = 0;
+  PROPOSE_DROPPED = 1;
+  ERR = 2;
+}
+
 message GetRequest {
   bytes key = 1;
   uint64 sequence = 2;
@@ -65,4 +71,21 @@ service KvService {
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
   rpc Txn(TxnRequest) returns (TxnResponse);
+}
+
+message StreamTxnRequest {
+  uint64 client_id = 1;
+  uint64 id = 2;
+  repeated KvOpRequest ops = 3;
+}
+
+message StreamTxnResponse {
+  uint64 client_id = 1;
+  uint64 id = 2;
+  repeated KvOpResponse ops = 3;
+  Status status = 4;
+}
+
+service StreamKvService {
+  rpc StreamTxn(stream StreamTxnRequest) returns (stream StreamTxnResponse);
 }

@@ -1,4 +1,5 @@
 #![feature(let_chains)]
+#![feature(generators, generator_trait)]
 
 pub mod components;
 pub mod config;
